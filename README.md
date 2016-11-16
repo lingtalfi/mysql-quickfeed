@@ -372,7 +372,50 @@ It's an array which keys are the filename to parse,
 and which values are an option array (same as what we've seen in the previous examples).
 
 
+### Using default values
 
+It's also possible to add your own default values, using the 'defaults' option.
+Below is a real life example illustrating that.
+
+
+
+```php
+$q = new QuickFeed([
+    'dbName' => 'oui',
+    'dbUser' => 'root',
+    'dbPass' => 'root',
+    'dbIsUtf8' => true,
+    'truncateTableBeforeStart' => false,
+    'feedDir' => "path/to/quick-feed",
+    'columnSeparator' => '##',
+    'config' => [
+        'users.txt' => [
+            'dbColumn' => ["email", "pseudo", "password"],
+            'defaults' => [
+                'active' => 1,
+                'url_photo' => url('/img/site/default-user.jpg'),
+                'nom' => '',
+                'prenom' => '',
+                'sexe' => 'h',
+                'date_naissance' => null,
+                'code_postal' => "",
+                'ville' => "",
+                'pays_id' => null,
+                'niveaux_id' => null,
+                'biographie' => "",
+                'influences' => "",
+                'prochains_concerts' => "",
+                'site_internet' => "",
+                'newsletter' => "n",
+                'show_sexe' => "n",
+                'show_date_naissance' => "n",
+                'show_niveau' => "n",
+            ],
+        ],
+    ],
+]);
+$q->feed();
+```
 
 
 
@@ -392,7 +435,7 @@ If you need random data, please use [Bullsheet](https://github.com/lingtalfi/Bul
 Log
 ==============
 
-- 2016-11-16: refactored the script in a class
+- 2016-11-16: refactored the script in a class, added defaults option
 - 2016-11-10: first strike
 
 
