@@ -1,167 +1,231 @@
 <?php
 
 
-//--------------------------------------------
-// CONFIG
-//--------------------------------------------
-// db connection info
-$dbName = "oui";
-$dbUser = "root";
-$dbPass = "root";
-$dbIsUtf8 = true;
-
-
-// feed target configuration
-$feedDir = null;
-$feedFile = "/path/to/your/countries.txt"; // this file contains one "item" per line
-$dbTable = "countries";
-$dbColumn = "name";
-$truncateTableBeforeStart = true;
-
-
-//--------------------------------------------
-// SCRIPT - you shouldn't edit below this line
-//--------------------------------------------
-function error($msg)
+class QuickFeed
 {
-    return '<span style="color: red">' . $msg . '</span>';
-}
+
+    private $dbName;
+    private $dbUser;
+    private $dbPass;
+    private $dbIsUtf8;
+
+    private $feedDir;
+
+    private $feedFile;
+    private $dbTable;
+    private $dbColumn;
+    private $fetchers;
 
 
-function insertArray(array $lines, string $dbTable, array $dbColumn, string $columnSeparator, array $fetchers = null)
-{
-    global $conn, $dbName;
-
-    $nbColumns = count($dbColumn);
+    private $columnSeparator;
+    private $truncateTableBeforeStart;
 
 
-    // compute the column names
-    $columns = array_map(function ($v) {
-        return ':' . $v;
-    }, $dbColumn);
-
-    $sColumns = implode(', ', $columns);
-    $sDbColumns = implode(', ', $dbColumn);
-
-    foreach ($lines as $line) {
-
-        // compute the values
-        $values = explode($columnSeparator, $line);
-        $values = array_map(function ($v) {
-            return trim($v);
-        }, $values);
-
-        if ($nbColumns === count($values)) {
-            $stmt = $conn->prepare("INSERT INTO $dbName.$dbTable ($sDbColumns) VALUES ($sColumns)");
-            foreach ($dbColumn as $column) {
-                $value = array_shift($values);
+    private $config;
 
 
-                if (is_array($fetchers) && array_key_exists($column, $fetchers)) {
-                    $fetchStatement = $fetchers[$column];
-                    $p = explode('::', $fetchStatement, 3);
-                    if (3 === count($p)) {
-                        $tmpTable = $p[0];
-                        $tmpColumn = $p[1];
-                        $tmpWhereColumn = $p[2];
-                        $q = "select $tmpColumn from $dbName.$tmpTable where $tmpWhereColumn=:name";
-                        $tmpStmt = $conn->prepare($q);
-                        $tmpStmt->bindValue(':name', $value);
-                        $tmpStmt->execute();
-                        $result = $tmpStmt->fetch(PDO::FETCH_ASSOC);
-                        $value = array_shift($result);
 
-                    } else {
-                        echo error("Invalid fetchStatement: $fetchStatement") . '<br>';
-                        return;
-                    }
+
+    // tmp
+    private $conn;
+
+
+
+
+    public function __construct(array $options)
+    {
+        $this->dbName = $options['dbName'];
+        $this->dbUser = $options['dbUser'];
+        $this->dbPass = $options['dbPass'];
+        $this->dbIsUtf8 = $options['dbIsUtf8'];
+
+
+        $this->feedDir = (array_key_exists('feedDir', $options)) ? $options['feedDir'] : null;
+
+
+        $this->feedFile = (array_key_exists('feedFile', $options)) ? $options['feedFile'] : null;
+        $this->dbTable = (array_key_exists('dbTable', $options)) ? $options['dbTable'] : null;
+        $this->dbColumn = (array_key_exists('dbColumn', $options)) ? $options['dbColumn'] : null;
+        $this->fetchers = (array_key_exists('fetchers', $options)) ? $options['fetchers'] : null;
+
+
+
+        $this->config = (array_key_exists('config', $options)) ? $options['config'] : [];
+
+        $this->columnSeparator = (array_key_exists('columnSeparator', $options)) ? $options['columnSeparator'] : '##';
+        $this->truncateTableBeforeStart = (array_key_exists('truncateTableBeforeStart', $options)) ? $options['truncateTableBeforeStart'] : true;
+
+    }
+
+    public function feed()
+    {
+
+        try {
+
+            $feedDir = $this->feedDir;
+            $config = $this->config;
+
+            //--------------------------------------------
+            // INITIATE DB CONNECTION
+            //--------------------------------------------
+            $dbOptions = [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            ];
+            if (true === $this->dbIsUtf8) {
+//            $dbOptions[PDO::MYSQL_ATTR_INIT_COMMAND] = "SET NAMES 'utf8'";
+                // with the option below, mysql doesn't complain about the default values not being set, it just fills the tables
+                // http://stackoverflow.com/questions/15438840/mysql-error-1364-field-doesnt-have-a-default-values
+                $dbOptions[PDO::MYSQL_ATTR_INIT_COMMAND] = "SET sql_mode=(SELECT REPLACE(@@sql_mode,'STRICT_TRANS_TABLES','')), NAMES 'utf8'";
+            }
+            $this->conn = new PDO('mysql:host=localhost;dbname=' . $this->dbName, $this->dbUser, $this->dbPass, $dbOptions);
+
+            //--------------------------------------------
+            // COMPUTE CONFIG
+            // we want to create a config array which contains all configurations, one configuration per file
+            // The user can specify either:
+            // - feedDir: to parse all the files in the given directory
+            // - feedFile: to parse a file in particular
+            //
+            // In both cases, codewise, we want to deal with one $config variable only, so that we can loop on it
+            //--------------------------------------------
+            if (null === $feedDir) {
+                $feedDir = dirname($this->feedFile);
+                $fileName = basename($this->feedFile);
+
+                $options = [
+                    'dbTable' => $this->dbTable,
+                    'dbColumn' => $this->dbColumn,
+                    'truncateTableBeforeStart' => $this->truncateTableBeforeStart,
+                ];
+                if (isset($this->fetchers)) {
+                    $options['fetchers'] = $this->fetchers;
+                }
+                $config = [
+                    $fileName => $options,
+                ];
+            }
+
+
+            //--------------------------------------------
+            // ITERATING THE CONFIG ARRAY
+            // A configItem contains the info necessary to feed a table
+            //--------------------------------------------
+            foreach ($config as $fileName => $configItem) {
+
+                echo '<h3>' . $fileName . '</h3>';
+                // set dbTable
+                $dbTable = null;
+                if (!array_key_exists('dbTable', $configItem)) {
+                    $dbTable = pathinfo($fileName, PATHINFO_FILENAME);
+                } else {
+                    $dbTable = $configItem['dbTable'];
                 }
 
+                $truncateTableBeforeStart = $configItem['truncateTableBeforeStart'] ?? $this->truncateTableBeforeStart;
+                $dbColumn = $configItem['dbColumn'];
 
-                $stmt->bindValue(':' . $column, $value);
+
+                if (true === $truncateTableBeforeStart) {
+                    // http://stackoverflow.com/questions/5452760/truncate-foreign-key-constrained-table
+                    $fullTable = $this->dbName . "." . $dbTable;
+                    $this->conn->query("DELETE FROM $fullTable");
+                    $this->conn->query("ALTER TABLE $fullTable AUTO_INCREMENT = 1");
+                }
+
+                $feedFile = $feedDir . "/" . $fileName;
+                $lines = file($feedFile, FILE_IGNORE_NEW_LINES);
+
+                if (is_string($dbColumn)) {
+                    foreach ($lines as $line) {
+                        echo $line . "<br>";
+                        $stmt = $this->conn->prepare("INSERT INTO $fullTable ($dbColumn) VALUES (:name)");
+                        $stmt->bindValue(':name', $line);
+                        $stmt->execute();
+                    }
+                } else if (is_array($dbColumn)) {
+                    $this->insertArray($lines, $dbTable, $dbColumn, $this->columnSeparator, $configItem);
+                }
             }
-            $stmt->execute();
-            echo $line . "<br>";
-        } else {
-            echo error("column count mismatch: $line") . '<br>';
-        }
-    }
-}
 
 
-try {
-
-    $dbOptions = [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-    ];
-    if (true === $dbIsUtf8) {
-        $dbOptions[PDO::MYSQL_ATTR_INIT_COMMAND] = "SET NAMES 'utf8'";
-    }
-    $conn = new PDO('mysql:host=localhost;dbname=' . $dbName, $dbUser, $dbPass, $dbOptions);
-
-
-    // compute config
-    if (!isset($feedDir)) {
-        $feedDir = dirname($feedFile);
-        $fileName = basename($feedFile);
-
-        $options = [
-            'dbTable' => $dbTable,
-            'dbColumn' => $dbColumn,
-            'truncateTableBeforeStart' => $truncateTableBeforeStart,
-        ];
-        if (isset($fetchers)) {
-            $options['fetchers'] = $fetchers;
-        }
-        $config = [
-            $fileName => $options,
-        ];
-    }
-
-
-    foreach ($config as $fileName => $configItem) {
-
-        echo '<h3>' . $fileName . '</h3>';
-        // set dbTable
-        $dbTable = null;
-        if (!array_key_exists('dbTable', $configItem)) {
-            $dbTable = pathinfo($fileName, PATHINFO_FILENAME);
-        } else {
-            $dbTable = $configItem['dbTable'];
+            $this->conn = null;
+        } catch (PDOException $e) {
+            echo $this->error("Error!: " . $e->getMessage()) . "<br/>";
+            die();
         }
 
-        $truncateTableBeforeStart = $configItem['truncateTableBeforeStart'] ?? true;
-        $dbColumn = $configItem['dbColumn'];
+    }
+
+    //--------------------------------------------
+    // PRIVATE
+    //--------------------------------------------
+
+    private function insertArray(array $lines, string $dbTable, array $dbColumn, string $columnSeparator, array $configItem)
+    {
+        $nbColumns = count($dbColumn);
 
         // set fetchers
         $fetchers = $configItem['fetchers'] ?? null;
 
 
-        if (true === $truncateTableBeforeStart) {
-            // http://stackoverflow.com/questions/5452760/truncate-foreign-key-constrained-table
-            $conn->query("DELETE FROM $dbName.$dbTable");
-            $conn->query("ALTER TABLE $dbName.$dbTable AUTO_INCREMENT = 1");
-        }
+        // compute the column names
+        $columns = array_map(function ($v) {
+            return ':' . $v;
+        }, $dbColumn);
 
-        $feedFile = $feedDir . "/" . $fileName;
-        $lines = file($feedFile, FILE_IGNORE_NEW_LINES);
+        $sColumns = implode(', ', $columns);
+        $sDbColumns = implode(', ', $dbColumn);
+        $fullTable = $this->dbName . "." .$dbTable;
+
+        foreach ($lines as $line) {
+
+            // compute the values
+            $values = explode($columnSeparator, $line);
+            $values = array_map(function ($v) {
+                return trim($v);
+            }, $values);
+
+            if ($nbColumns === count($values)) {
+                $stmt = $this->conn->prepare("INSERT INTO $fullTable ($sDbColumns) VALUES ($sColumns)");
+                foreach ($dbColumn as $column) {
+                    $value = array_shift($values);
 
 
-        if (is_string($dbColumn)) {
-            foreach ($lines as $line) {
-                echo $line . "<br>";
-                $stmt = $conn->prepare("INSERT INTO $dbName.$dbTable ($dbColumn) VALUES (:name)");
-                $stmt->bindValue(':name', $line);
+                    if (is_array($fetchers) && array_key_exists($column, $fetchers)) {
+                        $fetchStatement = $fetchers[$column];
+                        $p = explode('::', $fetchStatement, 3);
+                        if (3 === count($p)) {
+                            $tmpTable = $p[0];
+                            $tmpColumn = $p[1];
+                            $tmpWhereColumn = $p[2];
+                            $fullTmpTable = $this->dbName . "." . $tmpTable;
+                            $q = "select $tmpColumn from $fullTmpTable where $tmpWhereColumn=:name";
+                            $tmpStmt = $this->conn->prepare($q);
+                            $tmpStmt->bindValue(':name', $value);
+                            $tmpStmt->execute();
+                            $result = $tmpStmt->fetch(PDO::FETCH_ASSOC);
+                            $value = array_shift($result);
+
+                        } else {
+                            echo error("Invalid fetchStatement: $fetchStatement") . '<br>';
+                            return;
+                        }
+                    }
+
+
+                    $stmt->bindValue(':' . $column, $value);
+                }
                 $stmt->execute();
+                echo $line . "<br>";
+            } else {
+                echo error("column count mismatch: $line") . '<br>';
             }
-        } else if (is_array($dbColumn)) {
-            insertArray($lines, $dbTable, $dbColumn, $columnSeparator, $fetchers);
         }
     }
 
 
-    $conn = null;
-} catch (PDOException $e) {
-    echo error("Error!: " . $e->getMessage()) . "<br/>";
-    die();
+    private function error($msg)
+    {
+        return '<span style="color: red">' . $msg . '</span>';
+    }
 }

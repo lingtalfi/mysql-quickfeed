@@ -26,7 +26,8 @@ If you need random data, you might want to look at other tools like the [Bullshe
 How
 ===========
 
-In this section, we discuss the following topics.
+There are different things that you can do with the QuickFeed class.
+
 
 
 - fill a table with only one column (auto-incremented column doesn't count)
@@ -35,32 +36,20 @@ In this section, we discuss the following topics.
 - fill multiple tables at once (batch)
 
 
-For each of those topics, the preparation is the same:
-
-- download the quick-feed.php script
-- open it and customize the "db connection info" part of the CONFIG section
-- then customize the "feed target configuration" part of the CONFIG section (read the topics if you don't know how to)
-	- you also need to create the fixture file, obviously, but that's also covered in the topics
-- last step: open the script in your browser, done
-
-
-If you've succeeded, the script will display the list of inserted items.
-
-The script will also shows you any errors.
-
-Good luck!
-
-
 
 
 fill a table with only one column (auto-incremented column doesn't count)
 ------------------------------------------
 
+Let's say you have a table named countries, with the following fields
 
-This technique works great for the cases where you have only one column in the table, for instance a list of countries or
-a list of music styles, ...
+- id (auto-incremented)
+- name
 
-Create a text file with a content like this (one item per line).
+
+QuickFeed can help you feed this table.
+
+Create a text file named countries.txt with a content like this (one item per line).
 
 ```txt
 France
@@ -70,19 +59,48 @@ United States
 Zimbabwe
 ```
 
-Important: this will only work for a table with only ONE column.
 
 
-Here is your configuration:
+Then execute the following script to feed your table.
+
+
 
 ```php
-$feedDir = null;
-$feedFile = "/path/to/your/countries.txt"; // this file contains one "item" per line
-$dbTable = "countries";
-$dbColumn = "name";
-$truncateTableBeforeStart = true;
+<?php
+
+
+require_once __DIR__ . "/QuickFeed.php";
+
+
+$q = new QuickFeed([
+
+    /**
+     * Database dns and related parameters
+     */
+    'dbName' => 'oui',
+    'dbUser' => 'root',
+    'dbPass' => 'root',
+    'dbIsUtf8' => true,
+    /**
+     * Other default parameters and their default values.
+     * You can actually omit those unless you need to change their values.
+     */
+    'columnSeparator' => '##',
+    'truncateTableBeforeStart' => true,
+    //--------------------------------------------
+    // Below are the 'real' parameters
+    //--------------------------------------------
+    'feedFile' => 'countries.txt',
+    'dbTable' => 'countries',
+    'dbColumn' => 'name',
+]);
+$q->feed();
+
 ```
 
+
+Note: the countries table will be truncated before it is fed.
+If you prefer to keep the existing data, set the truncateTableBeforeStart option to false.
 
 
 
@@ -90,11 +108,16 @@ $truncateTableBeforeStart = true;
 fill a table with multiple columns (auto-incremented column doesn't count), no foreign keys
 ------------------------------------------
 
-This technique works great with small tables which content is known in advance.
-For instance the stuff members table.
+In this case, there is a table named stuff_members, which contains the following columns:
+
+- id (auto-incremented)
+- pseudo
+- email
+- url_photo
 
 
-Your fixture file uses the ## symbol (by default) as a separator between fields, like this:
+To feed this table, put each row's data on one line, and separate the columns with the double
+sharp symbol (##), like this:
 
 
 ```txt
@@ -105,16 +128,42 @@ paul            ##      kerberos-934@yahoo.com      ##      img/membre/paul.jpg
 ```
 
 
+Note: you can change the separator using the columnSeparator option.
 
-And here is your config:
+
+Then execute the following script to feed your table.
 
 ```php
-$feedDir = null;
-$feedFile = "/path/to/your/stuff_members.txt"; // this file contains one "item" per line
-$dbTable = "stuff_members";
-$dbColumn = ["pseudo", "email", "url_photo"];
-$truncateTableBeforeStart = true;
-$columnSeparator = '##';
+<?php
+
+
+require_once __DIR__ . "/QuickFeed.php";
+
+
+$q = new QuickFeed([
+
+    /**
+     * Database dns and related parameters
+     */
+    'dbName' => 'oui',
+    'dbUser' => 'root',
+    'dbPass' => 'root',
+    'dbIsUtf8' => true,
+    /**
+     * Other default parameters and their default values.
+     * You can actually omit those unless you need to change their values.
+     */
+    'columnSeparator' => '##',
+    'truncateTableBeforeStart' => true,
+    //--------------------------------------------
+    // Below are the 'real' parameters
+    //--------------------------------------------
+    'feedFile' => 'stuff_members.txt',
+    'dbTable' => 'stuff_members',
+    'dbColumn' => ["pseudo", "email", "url_photo"],
+]);
+$q->feed();
+
 ```
 
 
@@ -124,7 +173,7 @@ fill a table with multiple columns (auto-incremented column doesn't count), with
 
 Now let's imagine that you have a "has many" relationship.
 
-For this example, the tables and columns are described below:
+For this example, imagine that our schema looks like this:
 
 - team
 	- id
@@ -140,9 +189,11 @@ For this example, the tables and columns are described below:
 
 In this example we are interested in filling the team_has_members table.
 
-Also, we don't want to worry with the ids (because they might change), so instead, we use data that we know: the team's "nom" column and the members's pseudo column for instance.
+Also, we don't want to deal with the ids, because they might change in the future, and they are not human friendly.
 
-Here is the fixture file:
+Instead, we want to use the team's "nom" column and the members's pseudo column, which are more reliable, and more human friendly.
+
+Here is our team_has_members.txt file.
 
 ```txt
 komin >  ## 	clarisse
@@ -160,28 +211,56 @@ team 3   ## 	paul
 ```
 
 
-As you can see, I used the teams's "nom" values on the left of the column separator (##), and the members's "pseudo" values on the right.
+Now we need to tell QuickFeed how to parse our file.
 
-
-And here is your config:
 
 ```php
-$feedDir = null;
-$feedFile = "/pathto/your/fixtures/team_has_members.txt";
-$dbTable = "team_has_members";
-$dbColumn = ["team_id", "members_id"];
-$truncateTableBeforeStart = true;
-$columnSeparator = '##';
-$fetchers = [
-    "team_id" => 'team::id::nom',
-    "members_id" => 'members::id::pseudo',
-];
+<?php
+
+
+require_once __DIR__ . "/QuickFeed.php";
+
+
+$q = new QuickFeed([
+
+    /**
+     * Database dns and related parameters
+     */
+    'dbName' => 'oui',
+    'dbUser' => 'root',
+    'dbPass' => 'root',
+    'dbIsUtf8' => true,
+    /**
+     * Other default parameters and their default values.
+     * You can actually omit those unless you need to change their values.
+     */
+    'columnSeparator' => '##',
+    'truncateTableBeforeStart' => true,
+    //--------------------------------------------
+    // Below are the 'real' parameters
+    //--------------------------------------------
+    'feedFile' => 'team_has_members.txt',
+    'dbTable' => 'team_has_members',
+    'dbColumn' => ["team_id", "members_id"],
+    'fetchers' => [
+        "team_id" => 'team::id::nom',
+        "members_id" => 'members::id::pseudo',
+    ],
+]);
+$q->feed();
+
 ```
 
-The new thing here is the fetchers variable.
-It's an array, which keys are the values of the dbColumn array that we want to make a request from.
 
-And the values are a custom syntax that represents the sql statement to make.
+The new thing here is the fetchers option.
+
+It indicates how to replace the members of the dbColumn option (team_id and members_id in this case).
+
+The keys represent the the dbColumn member to replace.
+
+
+The values indicate how to replace it.
+It uses a custom syntax that represents a sql statement.
 
 It consists of three fields separated with the double colon (::) symbol.
 
@@ -193,15 +272,16 @@ The three fields are the following: **targetTable::targetName::targetWhere**.
 - targetWhere: name of the column used in the where clause
 
 
-The sql statement will look like this, approximately (but more secure):
+The symbolic resulting sql statement will look like this (to give you an idea of what's going on):
 ```mysql	
 SELECT targetColumn from targetTable WHERE targetWhere=$value
 ```	
 
-And the result of this sql query will be used instead, so team 1 for instance will be replaced with whatever team's id matches the request:
+And the result of this sql query will be used instead, so "team 1" for instance will be replaced with whatever team's id matches
+the following request:
 
 ```mysql
-select id from team where nom='team1'
+select id from team where nom='team 1'
 ```
 
 
@@ -211,45 +291,85 @@ select id from team where nom='team1'
 fill multiple tables at once (batch)
 ----------------------------------------
 
-So now our tool starts to be useful, but it would be an easier workflow if we could simply put all those fixtures in one directory
-and fill all the tables in one fell swoop.
 
-This is possible.
+So far, we've been working on a per table basis.
 
-Create a directory (called /pathto/fixtures/quick-feed in this section) and put all your quick feed's fixtures in it.
+While this is fine to understand how QuickFeed works, in a real world scenario you will generally want to
+feed multiple tables in one pass.
 
-Now here is your config:
+QuickFeed can do that too!
+
+You need to create a directory (named quick-feed thereafter), and put all your fixtures files in it.
+
+
+When this is done, you then need to indicate which files you want to process.
+
+This example should be self-explaining.
+
+
+
 
 ```php
-$feedDir = "/pathto/fixtures/quick-feed ";
-$columnSeparator = '##';
-$config = [
-    'team.txt' => [
-        'dbColumn' => 'nom',
-    ],
-    'instruments.txt' => [
-        'dbColumn' => 'nom',
-    ],
-    'members.txt' => [
-        'dbColumn' => ["pseudo", "email", "url_photo"],
-    ],
-    'countries.txt' => [
-        'dbColumn' => 'nom',
-    ],
-    'styles.txt' => [
-        'dbTable' => 'musical_styles',
-        'dbColumn' => 'nom',
-    ],
-    'team_has_members.txt' => [
-        'dbColumn' => ["team_id", "members_id"],
-        'fetchers' => [
-			"team_id" => 'team::id::nom',
-		    "members_id" => 'members::id::pseudo',
+<?php
+
+
+require_once __DIR__ . "/QuickFeed.php";
+
+
+$q = new QuickFeed([
+
+    /**
+     * Database dns and related parameters
+     */
+    'dbName' => 'oui',
+    'dbUser' => 'root',
+    'dbPass' => 'root',
+    'dbIsUtf8' => true,
+    /**
+     * Other default parameters and their default values.
+     * You can actually omit those unless you need to change their values.
+     */
+    'columnSeparator' => '##',
+    'truncateTableBeforeStart' => true,
+    //--------------------------------------------
+    // Below are the 'real' parameters
+    //--------------------------------------------
+    'feedDir' => '/path/to/quick-feed',
+    'config' => [
+        'team.txt' => [
+            'dbColumn' => 'nom',
+        ],
+        'instruments.txt' => [
+            'dbColumn' => 'nom',
+        ],
+        'members.txt' => [
+            'dbColumn' => ["pseudo", "email", "url_photo"],
+        ],
+        'countries.txt' => [
+            'dbColumn' => 'nom',
+        ],
+        'styles.txt' => [
+            'dbTable' => 'musical_styles',
+            'dbColumn' => 'nom',
+        ],
+        'team_has_members.txt' => [
+            'dbColumn' => ["team_id", "members_id"],
+            'fetchers' => [
+                "team_id" => 'team::id::nom',
+                "members_id" => 'members::id::pseudo',
+            ],
         ],
     ],
-];
+]);
+$q->feed();
+
 ```
 
+
+The novelty here is the config option.
+
+It's an array which keys are the filename to parse,
+and which values are an option array (same as what we've seen in the previous examples).
 
 
 
@@ -263,6 +383,17 @@ Related
 
 If you need random data, please use [Bullsheet](https://github.com/lingtalfi/BullSheet) instead
 
+
+
+
+
+
+
+Log
+==============
+
+- 2016-11-16: refactored the script in a class
+- 2016-11-10: first strike
 
 
 
