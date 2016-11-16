@@ -162,11 +162,19 @@ class QuickFeed
 
     private function insertArray(array $lines, string $dbTable, array $dbColumn, string $columnSeparator, array $configItem)
     {
-        $nbColumns = count($dbColumn);
+
 
         // set fetchers
         $fetchers = $configItem['fetchers'] ?? null;
 
+
+        $defaults = (array_key_exists('defaults', $configItem)) ? $configItem['defaults'] : [];
+
+
+        foreach($defaults as $k => $v){
+            $dbColumn[] = $k;
+        }
+        $nbColumns = count($dbColumn);
 
         // compute the column names
         $columns = array_map(function ($v) {
@@ -184,6 +192,11 @@ class QuickFeed
             $values = array_map(function ($v) {
                 return trim($v);
             }, $values);
+
+            foreach($defaults as $v){
+                $values[] = $v;
+            }
+
 
             if ($nbColumns === count($values)) {
                 $stmt = $this->conn->prepare("INSERT INTO $fullTable ($sDbColumns) VALUES ($sColumns)");
@@ -218,7 +231,7 @@ class QuickFeed
                 $stmt->execute();
                 echo $line . "<br>";
             } else {
-                echo error("column count mismatch: $line") . '<br>';
+                echo $this->error("column count mismatch: $line") . '<br>';
             }
         }
     }
